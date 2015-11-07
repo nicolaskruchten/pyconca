@@ -1,0 +1,103 @@
+def dispatcher(line):
+    print line
+
+def load_ipython_extension(ipython, *args):
+    ipython.register_magic_function(dispatcher, 'line', magic_name="http")
+
+def unload_ipython_extension(ipython):
+    pass
+
+
+
+##########################
+
+
+import requests
+
+def dispatcher(line):
+    parts = line.strip().split(" ")
+    
+    if (len(parts) == 2 and parts[0] in ["GET", "DELETE"]):
+
+        verb, uri = parts
+        if verb == "GET":
+            return requests.get(uri)
+        elif verb == "DELETE":
+            return requests.delete(uri)
+
+    elif (len(parts) > 2 and parts[0] in ["GET", "PUT", "POST"]):
+
+        verb = parts[0]
+        uri = parts[1]
+        payload = json.loads(" ".join(parts[2:]))
+        if verb == "GET":
+            return requests.get(uri, params=payload)
+        elif verb == "PUT":
+            return requests.put(uri, json=payload)
+        elif verb == "POST":
+            return requests.post(uri, json=payload)
+                              
+    else:
+        print """Usage:
+
+    %http GET <url>
+    %http DELETE <url>
+                        HTTP GET/DELETE request to <url>.
+                        
+    %http GET <url> <json query params>       
+                        HTTP GET request to <url>, JSON will be used to       
+                        create query string.       
+                        
+    %http PUT <url> <json>
+    %http POST <url> <json>
+                        HTTP PUT/POST request to <url>, <json> will
+                        be sent as JSON payload. 
+"""
+        
+
+##########################
+
+
+import types, json
+from pygments import highlight
+from pygments.lexers import JsonLexer
+from pygments.formatters import HtmlFormatter
+from pygments.style import Style
+from pygments.token import Keyword, Name, String, Number
+
+class PygmentsStyle(Style):
+    default_style = ""
+    styles = {
+        Name: 'bold #333', String: '#00d', Number: '#00d', Keyword: '#00d'
+    }
+        
+def add_repr_html_to_response(resp):
+    def _repr_html_(self):
+        result = "<strong>%s %s</strong><br />" % (self.request.method, self.request.url)
+        color = "black"
+        if self.status_code >= 400: color = "red" 
+        if self.status_code < 300: color = "green" 
+        result += "<strong style=\"color: %s;\">%d %s</strong><br /> " % (color, self.status_code, self.reason)
+        if "content-type" in self.headers:
+            if self.headers["content-type"] == "application/json":
+                result += highlight(
+                    json.dumps(self.json(), indent=2), 
+                    JsonLexer(), 
+                    HtmlFormatter(noclasses = True, nobackground =True, style=PygmentsStyle)
+                    )
+            elif self.headers["content-type"] == "text/html":
+                result += self.content
+        else:
+            result += "<pre>"+self.content+"</pre>"
+        return result
+    resp._repr_html_ = types.MethodType(_repr_html_, resp)
+    return resp
+
+def decorate_response(fn):
+    def inner(*args, **kwargs):
+        result = fn(*args, **kwargs)
+        if result is not None:
+            return add_repr_html_to_response(result)
+        else:
+            print result
+    return inner
